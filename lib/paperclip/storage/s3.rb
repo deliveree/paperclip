@@ -180,13 +180,29 @@ module Paperclip
         end unless Paperclip::Interpolations.respond_to? :asset_host
       end
 
-      def expiring_url(time = 3600, style_name = default_style)
-        if path(style_name)
-          base_options = { :expires => time, :secure => use_secure_protocol?(style_name) }
-          s3_object(style_name).url_for(:read, base_options.merge(s3_url_options)).to_s
-        else
-          url(style_name)
+      def expiring_url(time = 1.day, style_name = default_style)
+        unless time.is_a?(Integer)
+          style_name = time
+          time = 1.day
         end
+        Rails.cache.fetch("#{cache_key_with_version}/#{style_name}/expiring_url", expires_in: calculate_expires_in(time)) do
+          if path(style_name)
+            base_options = { :expires => time, :secure => use_secure_protocol?(style_name) }
+            s3_object(style_name).url_for(:read, base_options.merge(s3_url_options)).to_s
+          else
+            url(style_name)
+          end
+        end
+      end
+
+      # Cache in redis will be expired sooner 30 seconds than AWS S3 URL
+      def calculate_expires_in(time)
+        return time if time <= 30
+        time - 30
+      end
+
+      def cache_key_with_version
+        "s3_url/#{instance.class.name}_#{instance.id}_#{name}_#{updated_at}"
       end
 
       def s3_credentials
